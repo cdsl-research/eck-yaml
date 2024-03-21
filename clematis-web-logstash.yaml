@@ -1,0 +1,75 @@
+apiVersion: logstash.k8s.elastic.co/v1alpha1
+kind: Logstash
+metadata:
+  name: clematic
+  namespace: elastic-system
+spec:
+  count: 1
+  version: 8.12.2
+  elasticsearchRefs:
+    - name: quickstart
+      namespace: elastic-system
+      clusterName: quickstart
+  pipelines:
+    - pipeline.id: main
+      config.string: |
+        input {
+          http_poller {
+            urls => {
+              fluentd => {
+                url => "http://192.168.201.8:30088/"
+                headers => {
+                  "Authorization" => "Basic Y2RzbDpjZHNsMjAyNA=="
+                }
+              }
+            }
+            request_timeout => 60
+            schedule => { every => "30s"}
+          }
+        }
+        output {
+          elasticsearch {
+            hosts => ["${QS_ES_HOSTS}"]
+            user => "${QS_ES_USER}"
+            password => "${QS_ES_PASSWORD}"
+            #ssl_certificate_authorities => ["/usr/share/logstash/config/certs/ca.crt"]
+            ssl_verification_mode => "none"
+            index => "clematis-web-%{+YYYY.MM.dd}"
+          }
+        }
+  podTemplate:
+    spec:
+      containers:
+      - name: logstash
+        resources:
+          limits:
+            memory: "1024Mi"
+        env:
+        - name: QS_ES_HOSTS
+          value: "https://quickstart-es-http.elastic-system.svc.cluster.local:9200"
+        - name: QS_ES_USER
+          value: "elastic"
+        - name: QS_ES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: quickstart-es-elastic-user
+              key: elastic
+        volumeMounts:
+        - name: es-certs
+          mountPath: "/usr/share/logstash/config/certs"
+          readOnly: true
+      volumes:
+      - name: es-certs
+        secret:
+          secretName: quickstart-es-http-certs-public
+  services:
+    - name: beats
+      service:
+        spec:
+          type: NodePort
+          ports:
+            - port: 5044
+              name: "filebeat"
+              protocol: TCP
+              targetPort: 5044
+              nodePort: 32144
